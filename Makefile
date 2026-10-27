@@ -4,7 +4,7 @@
 
 # Use a specific Go toolchain version to ensure consistent builds across different environments.
 # renovate: datasource=golang-version depName=go
-export GOTOOLCHAIN = go1.27.1
+export GOTOOLCHAIN = go1.27.3
 # $(GOTOOLCHAIN) is exported, but exported make variables are not propagated into the environment of $(shell ...) sub-shells.
 # By exporting it explicitly in the SHELL command, it becomes available also in sub-shells.
 SHELL=/usr/bin/env GOTOOLCHAIN=$(GOTOOLCHAIN) bash -o pipefail
@@ -75,8 +75,18 @@ generate: tools-for-generate $(GOIMPORTS) $(FLUX_CLI) $(YQ)
 	@$(HACK_DIR)/sync-glk-version.sh
 	$(MAKE) format
 
+export GOLANGCI_LINT_VERSION = v2.15.0 # This is just relevant for GLK's release branch release-v0.6
+
+# Override gardener's go_tool_copy-based gosec installation with go install to ensure
+# the binary is compiled with the project's Go toolchain and x/tools version, which is
+# required because gosec's bundled x/tools in gardener/hack/tools v1.151.1 predates Go 1.27.
+$(GOLANGCI_LINT): $(call tool_version_file,$(GOLANGCI_LINT),$(GOLANGCI_LINT_VERSION))
+	GOBIN=$(abspath $(TOOLS_BIN_DIR)) GOWORK=off go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION)
+	@touch $(call tool_version_file,$(GOLANGCI_LINT),$(GOLANGCI_LINT_VERSION))
+
 .PHONY: check
 check: $(GOIMPORTS) $(GOLANGCI_LINT) $(YQ)
+	@[ "$$(go version $(GOLANGCI_LINT) | awk '{print $$2}')" = "$(GOTOOLCHAIN)" ] || { rm -f $(GOLANGCI_LINT); $(MAKE) $(GOLANGCI_LINT); } # TODO(LucaBernstein): Remove this force-rebuild of gosec once g/g includes the Go version a tool was built with in the version file.
 	@REPO_ROOT=$(REPO_ROOT) bash $(GARDENER_HACK_DIR)/check.sh --golangci-lint-config=./.golangci.yaml ./cmd/... ./pkg/...
 	@GARDENER_HACK_DIR=$(GARDENER_HACK_DIR) hack/skaffold-deps.sh check
 	@hack/check-component-yaml.sh
@@ -93,8 +103,18 @@ check-generate:
 clean:
 	@bash $(GARDENER_HACK_DIR)/clean.sh ./pkg/...
 
+export GOSEC_VERSION = v2.30.0 # This is just relevant for GLK's release branch release-v0.6
+
+# Override gardener's go_tool_copy-based gosec installation with go install to ensure
+# the binary is compiled with the project's Go toolchain and x/tools version, which is
+# required because gosec's bundled x/tools in gardener/hack/tools v1.151.1 predates Go 1.27.
+$(GOSEC): $(call tool_version_file,$(GOSEC),$(GOSEC_VERSION))
+	GOBIN=$(abspath $(TOOLS_BIN_DIR)) GOWORK=off go install github.com/securego/gosec/v2/cmd/gosec@$(GOSEC_VERSION)
+	@touch $(call tool_version_file,$(GOSEC),$(GOSEC_VERSION))
+
 .PHONY: sast
 sast: $(GOSEC)
+	@[ "$$(go version $(GOSEC) | awk '{print $$2}')" = "$(GOTOOLCHAIN)" ] || { rm -f $(GOSEC); $(MAKE) $(GOSEC); } # TODO(LucaBernstein): Remove this force-rebuild of gosec once g/g includes the Go version a tool was built with in the version file.
 	@HACK_DIR=$(HACK_DIR) GARDENER_HACK_DIR=$(GARDENER_HACK_DIR) bash $(HACK_DIR)/sast.sh --exclude-dirs hack,dev
 
 .PHONY: sast-report
